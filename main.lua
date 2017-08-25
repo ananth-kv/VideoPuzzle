@@ -59,30 +59,41 @@ print("Dataset: " .. opt.dataset, " Size: ", data:size())
 -- define the model
 local net = nn.Sequential()
 if opt.finetune == '' then -- build network from scratch
-  local features = nn.Sequential()
-  features:add(cudnn.SpatialConvolution(3,96,11,11,4,4,5,5))       -- 224 -> 55
-  features:add(cudnn.ReLU(true))
-  features:add(cudnn.SpatialMaxPooling(3,3,2,2,1,1))               -- 55 ->  27
-  features:add(cudnn.SpatialCrossMapLRN(5, 0.0001,0.75,2))
-  features:add(cudnn.SpatialConvolution(96,256,5,5,1,1,2,2))       --  27 -> 27
-  features:add(cudnn.ReLU(true))
-  features:add(cudnn.SpatialMaxPooling(3,3,2,2,1,1))                   --  27 ->  13
-  features:add(cudnn.SpatialCrossMapLRN(5, 0.0001,0.75,2))
-  features:add(cudnn.SpatialConvolution(256,384,3,3,1,1,1,1))      --  13 ->  13
-  features:add(cudnn.ReLU(true))
-  features:add(cudnn.SpatialConvolution(384,384,3,3,1,1,1,1))      --  13 ->  13
-  features:add(cudnn.ReLU(true))
-  features:add(cudnn.SpatialConvolution(384,256,3,3,1,1,1,1))      --  13 ->  13
-  features:add(cudnn.ReLU(true))
-  features:add(cudnn.SpatialMaxPooling(3,3,2,2))                   -- 13 -> 6
-  features:add(nn.View(-1):setNumInputDims(3))
-  features:add(nn.Linear(256, 1024))
-  features:add(cudnn.ReLU())
+  local function Block(...)
+    local arg = {...}
+    net:add(cudnn.VolumetricConvolution(...))
+    net:add(cudnn.VolumetricBatchNormalization(arg[2]))
+    net:add(cudnn.ReLU(true))
+    return net
+  end
+
+  Block(1,48,6,6,6,2,2,2)
+  Block(48,48,1,1,1)
+  Block(48,48,1,1,1)
+  net:add(nn.Dropout(0.2))
+
+  Block(48,96,5,5,5,2,2,2)
+  Block(96,96,1,1,1)
+  Block(96,96,1,1,1)
+  net:add(nn.Dropout(0.2))
+
+  Block(96,512,3,3,3,2,2,2)
+  Block(512,512,1,1,1)
+  Block(512,512,1,1,1)
+  net:add(nn.Dropout(0.2))
+
+  net:add(nn.View(4096))
+  net:add(nn.Linear(4096,512))
+  net:add(cudnn.ReLU(true))
+  net:add(nn.Dropout(0.5))
+
+  net:add(nn.Linear(512,40))
+
 
   local siamese_encoder = nn.ParallelTable()
   siamese_encoder:add(features)
 
-  for i =1,8 do
+  for i =1,5 do
     siamese_encoder:add(features:clone('weight','bias', 'gradWeight','gradBias'))
   end
 
@@ -154,7 +165,7 @@ disp.url = 'http://localhost:' .. opt.display_port .. '/events'
 local data_im,data_label
 local fx = function(x)
   gradParameters:zero()
-  
+
   -- fetch data
   data_tm:reset(); data_tm:resume()
   data_im,data_label = data:getBatch()
@@ -164,28 +175,28 @@ local fx = function(x)
   -- ship data to GPU
   input:copy(data_im:squeeze())
   label:copy(data_label)
-  
+
   -- forward, backwards
   local output = net:forward(input)
   err = criterion:forward(output, label)
   local df_do = criterion:backward(output, label)
   net:backward(input, df_do)
- 
+
   local _,preds = output:float():sort(2, true)
-   
-   top1 = 0  
-   top5 = 0
-   for i=1, opt.batchSize do 
-     local rank = torch.eq(preds[i], data_label[i]):nonzero()[1][1] 
-     if rank == 1 then 
-        top1 = top1 + 1 
-     end
-     if rank <= 5 then 
-        top5 = top5 + 1
-     end
-   end 
-   top1 = top1:div(opt.batchSize)
-   top5 = top5:div(opt.batchSize)
+
+  top1 = 0
+  top5 = 0
+  for i=1, opt.batchSize do
+    local rank = torch.eq(preds[i], data_label[i]):nonzero()[1][1]
+    if rank == 1 then
+      top1 = top1 + 1
+    end
+    if rank <= 5 then
+      top5 = top5 + 1
+    end
+  end
+  top1 = top1:div(opt.batchSize)
+  top5 = top5:div(opt.batchSize)
   -- return gradients
   return err, gradParameters
 end
@@ -196,8 +207,8 @@ local history = {}
 -- very important: you must only create this table once! 
 -- the optimizer will add fields to this table (such as momentum)
 local optimState = {
-   learningRate = opt.lr,
-   beta1 = opt.beta1,
+  learningRate = opt.lr,
+  beta1 = opt.beta1,
 }
 
 
@@ -206,12 +217,12 @@ print('Starting Optimization...')
 -- train main loop
 for counter = 1,opt.niter do
   collectgarbage() -- necessary sometimes
-  
+
   tm:reset()
 
   -- do one iteration
   optim.adam(fx, parameters, optimState)
-  
+
   -- logging
   if false then --counter % 10 == 1 then
     table.insert(history, {counter, err})
@@ -224,10 +235,10 @@ for counter = 1,opt.niter do
     disp.image(w, {win=2, title=(opt.name .. ' conv1')})
     --disp.image(data_im:narrow(2,1,1), {win=3, title=(opt.name .. ' batch')})
   end
-  
+
   print(('%s %s Iter: [%7d / %7d]  Time: %.3f  DataTime: %.3f  Err: %.4f top-1: %.2f top-5: %.2f'):format(
-          opt.name, opt.hostname, counter, opt.niter, tm:time().real, data_tm:time().real,
-          err, top1, top5))
+    opt.name, opt.hostname, counter, opt.niter, tm:time().real, data_tm:time().real,
+    err, top1, top5))
 
   -- save checkpoint
   -- :clearState() compacts the model so it takes less space on disk
