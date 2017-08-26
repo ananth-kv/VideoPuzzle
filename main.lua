@@ -7,9 +7,9 @@ require 'optim'
 opt = {
     dataset = 'hdf5',   -- indicates what dataset load to use (in data.lua)
     nThreads = 32,        -- how many threads to pre-fetch data
-    batchSize = 2,      -- self-explanatory
-    loadSize = 256,       -- when loading images, resize first to this size
-    fineSize = 225,       -- crop this size from the loaded image
+    batchSize = 32,      -- self-explanatory
+    loadSize = 64,       -- when loading images, resize first to this size
+    fineSize = 64,       -- crop this size from the loaded image
     patchSize = 64,       -- size of each grid (i.e, batch_sizex3x64x64)
     nClasses = 5,       -- number of category
     lr = 0.005,           -- learning rate
@@ -24,14 +24,13 @@ opt = {
     randomize = 1,        -- whether to shuffle the data file or not
     cropping = 'random',  -- options for data augmentation
     display_port = 8000,  -- port to push graphs
-    name = 'puzzleMnist',--paths.basename(paths.thisfile()):sub(1,-5), -- the name of the experiment (by default, filename)
+    name = 'puzzleVideo',--paths.basename(paths.thisfile()):sub(1,-5), -- the name of the experiment (by default, filename)
     --data_root = '/nfs_mount/datasets/other/medical/nlm/NLMCXR_png/',
     --data_list = '/nfs_mount/data/ananth/medical_data/trainList_6k.txt',
     mean = {-0.083300798050439,-0.10651495109198,-0.17295466315224},
     labelDim = 1,
     labelName = "/images",
-    labelFile = "/nfs_mount/data/ananth/medical_data/val_mnist.h5",
-    --labelFile = "/nfs_mount/data/ananth/medical_data/train_6k.h5",
+    labelFile = "/nfs_mount/data/ananth/thumos/train.h5"
 }
 
 -- one-line argument parser. parses enviroment variables to override the defaults
@@ -115,7 +114,7 @@ print(net)
 local criterion = nn.CrossEntropyCriterion()
 
 -- create the data placeholders
-local input = torch.Tensor(opt.batchSize, 9, 3, opt.patchSize, opt.patchSize)
+local input = torch.Tensor(opt.batchSize, 5, 3, 16, opt.patchSize, opt.patchSize)
 local label = torch.Tensor(opt.batchSize)
 local err
 
@@ -214,9 +213,9 @@ for counter = 1,opt.niter do
         --disp.image(data_im:narrow(2,1,1), {win=3, title=(opt.name .. ' batch')})
     end
 
-    print(('%s %s Iter: [%7d / %7d]  Time: %.3f  DataTime: %.3f  Err: %.4f top-1: %.2f top-5: %.2f'):format(
+    print(('%s %s Iter: [%7d / %7d]  Time: %.3f  DataTime: %.3f  Err: %.4f top-1: %.2f'):format(
         opt.name, opt.hostname, counter, opt.niter, tm:time().real, data_tm:time().real,
-        err, top1, top5))
+        err, top1))
 
     -- save checkpoint
     -- :clearState() compacts the model so it takes less space on disk

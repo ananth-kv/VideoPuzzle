@@ -28,7 +28,7 @@ function dataset:__init(args)
 
 
     self.hdf5_data = hdf5.open(self.labelFile, 'r')
-    self.permutations = torch.load('./data/shuffle.dat')
+    self.permutations = torch.load('permutations.dat')
     --fd:close()
 
     -- we are going to read args.data_list
@@ -36,9 +36,9 @@ function dataset:__init(args)
     -- we use tds.Vec() because they have no memory constraint
     --self.data = tds.Vec()
     --for line in io.lines(args.data_list) do
-      --  local split = {}
-        --for k in string.gmatch(line, "%S+") do table.insert(split, k) end
-        --self.data:insert(split[1])
+    --  local split = {}
+    --for k in string.gmatch(line, "%S+") do table.insert(split, k) end
+    --self.data:insert(split[1])
     --end
     self.nImgs = self.hdf5_data:read(self.labelName):dataspaceSize()[1]
 
@@ -50,18 +50,18 @@ function dataset:size()
 end
 
 -- converts a table of samples (and corresponding labels) to a clean tensor
-function dataset:tableToOutput(dataTable, labelTable)
+function dataset:tableToOutput(dataTable, labelTable, extraTable)
     local data, scalarLabels, labels
     local quantity = #labelTable
-    assert(dataTable[1]:dim() == 4) -- number of patches
-    assert(dataTable[2]:dim() == 4) -- number of channels
-    data = torch.Tensor(quantity, 9, 3, self.patchSize, self.patchSize)
+    assert(dataTable[1]:dim() == 5) -- number of videos
+    assert(dataTable[2]:dim() == 3) -- number of channels
+    data = torch.Tensor(quantity, 5, 3, 16, self.patchSize, self.patchSize)
     scalarLabels = torch.Tensor(quantity, self.labelDim):fill(-1111)
     for i=1,#dataTable do
         data[i]:copy(dataTable[i])
         scalarLabels[i] = labelTable[i]
     end
-    return data, scalarLabels
+    return data, scalarLabels, extraTable
 end
 
 -- sampler, samples with replacement from the training set.
@@ -69,18 +69,21 @@ function dataset:sample(quantity)
     assert(quantity)
     local dataTable = {}
     local labelTable = {}
-    --local extraTable = {}
+    local extraTable = {}
     for i=1,quantity do
         local idx = torch.random(1, self.nImgs)
-        local img = self.hdf5_data:read(self.labelName):partial({idx, idx},{1,1},{1,225},{1,225})
-        local out, data_label = self:trainHook(img)
+        local imgs = self.hdf5_data:read(self.labelName):partial({idx, idx},{1,5},{1,3},{1,16},{1,64},{1,64})
+
+        local data_label = torch.random(1,120)
+        local perm = self.permutations[label]	-- get the permutation
+        local out = imgs:index(1,perm:long()) 	-- shuffle the clips
 
         table.insert(dataTable, out)
         table.insert(labelTable, data_label)
-        --table.insert(extraTable, self.data[idx])
+        table.insert(extraTable, idx)
     end
 
-    return self:tableToOutput(dataTable,labelTable)
+    return self:tableToOutput(dataTable,labelTable,extraTable)
 end
 
 -- gets data in a certain range
@@ -91,25 +94,24 @@ function dataset:get(start_idx,stop_idx)
     assert(start_idx<=#self.data)
     local dataTable = {}
     local labelTable = {}
-    --local extraTable = {}
+    local extraTable = {}
 
     local imgs
     if stop_idx > #self.data then
-        imgs = self.hdf5_data:read(self.labelName):partial({{start_idx, #self.data},{1,1},{1,225},{1,225}})
+        imgs = self.hdf5_data:read(self.labelName):partial({start_idx, #self.data},{1,5},{1,3},{1,16},{1,64},{1,64})
     else
-        imgs = self.hdf5_data:read(self.labelName):partial({start_idx, stop_idx},{1,1},{1,225},{1,225})
+        imgs = self.hdf5_data:read(self.labelName):partial({start_idx, stop_idx},{1,5},{1,3},{1,16},{1,64},{1,64})
     end
 
-    --local data_path = self.data_root .. '/' .. self.data[idx]
-
-    --local data_label = hdf5_data[self.label_idx[idx]]
     for idx=1,imgs:size(1) do
-        local out, data_label = self:trainHook(imgs[idx])
+        local data_label = torch.random(1,120)
+        local perm = self.permutations[label]	-- get the permutation
+        local out = imgs[idx]:index(1,perm:long()) 	-- shuffle the clips
+
         table.insert(dataTable, out)
         table.insert(labelTable, data_label)
-        --table.insert(extraTable, self.data[idx])
     end
-    return self:tableToOutput(dataTable,labelTable)
+    return self:tableToOutput(dataTable,labelTable,extraTable)
 end
 
 -- function to load the image, jitter it appropriately (random crops etc.)
@@ -164,46 +166,6 @@ function dataset:loadImage(input)
     end
 
     return input
-end
-
--- function to generate jigsaw puzzle by dividing an image
--- into nine 64X64 grids and permuting randomly
--- input: image 3x225x225
--- output: puzzle 9x3x64x64, label number between 1 and 100
-function dataset:generatePuzzle(im)
-
-    local oH = self.fineSize
-    local oW = self.fineSize
-    local sH = self.patchSize
-    local sW = self.patchSize
-    local np = 9		-- patches 3X3
-    local nc = 3		--channels
-    local iW = im:size(3)
-    local iH = im:size(2)
-
-    local patches = torch.Tensor(np,nc,sW,sH)
-    
-    if im:size(1) == 1 then
-       im = torch.cat({im,im,im},1)
-    end
-
-    local count = 1
-    for w1=0,oW-oW/3,oW/3 do
-        for h1=0,oH-oH/3,oH/3 do
-            w2 = w1 + math.ceil(torch.uniform(1e-2, oW/3-sW))
-            h2 = h1 + math.ceil(torch.uniform(1e-2, oH/3-sH))
-            patches[count] = image.crop(im, w2, h2, w2 + sW, h2 + sH)
-            count = count + 1
-        end
-    end
-
-    -- for label = pick a random number between 1 and 100
-    local label = torch.random(1,100)
-    local perm = self.permutations[label]	-- get the permutation
-    local puzzle = patches:index(1,perm:long()) 	-- shuffle the images
-
-
-    return puzzle, label
 end
 
 -- data.lua expects a variable called trainLoader
