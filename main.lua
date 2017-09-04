@@ -5,11 +5,12 @@ require 'optim'
 -- to specify these at runtime, you can do, e.g.:
 --    $ lr=0.001 th main.lua
 opt = {
-    dataset = 'hdf5',   -- indicates what dataset load to use (in data.lua)
+    dataset = 'simple',   -- indicates what dataset load to use (in data.lua)
     nThreads = 32,        -- how many threads to pre-fetch data
     batchSize = 32,      -- self-explanatory
-    loadSize = 64,       -- when loading images, resize first to this size
+    loadSize = 128,       -- when loading images, resize first to this size
     fineSize = 64,       -- crop this size from the loaded image
+    frameSize = 16,      -- number of frames per clip
     patchSize = 64,       -- size of each grid (i.e, batch_sizex3x64x64)
     nClasses = 5,       -- number of category
     lr = 0.005,           -- learning rate
@@ -25,12 +26,9 @@ opt = {
     cropping = 'random',  -- options for data augmentation
     display_port = 8000,  -- port to push graphs
     name = 'puzzleVideo',--paths.basename(paths.thisfile()):sub(1,-5), -- the name of the experiment (by default, filename)
-    --data_root = '/nfs_mount/datasets/other/medical/nlm/NLMCXR_png/',
-    --data_list = '/nfs_mount/data/ananth/medical_data/trainList_6k.txt',
-    mean = {-0.083300798050439,-0.10651495109198,-0.17295466315224},
-    labelDim = 1,
-    labelName = "/images",
-    labelFile = "/nfs_mount/data/ananth/thumos/train.h5"
+    data_root = '',
+    data_list = '/nfs_mount/data/ananth/thumos/train.txt',
+    mean = {0,0,0},
 }
 
 -- one-line argument parser. parses enviroment variables to override the defaults

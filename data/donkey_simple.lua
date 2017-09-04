@@ -16,6 +16,7 @@ torch.setdefaulttensortype('torch.FloatTensor')
 local class = require('pl.class')
 
 local dataset = torch.class('dataLoader')
+local permutation = torch.load("/nfs_mount/code/ananth/code/VideoPuzzle/data/permutations.t7")
 
 -- this function reads in the data files
 function dataset:__init(args)
@@ -25,18 +26,15 @@ function dataset:__init(args)
   -- we split on the tab
   -- we use tds.Vec() because they have no memory constraint 
   self.data = tds.Vec()
-  self.label = tds.Vec()
+  print('reading ' .. args.data_list)
   for line in io.lines(args.data_list) do 
     local split = {}
     for k in string.gmatch(line, "%S+") do table.insert(split, k) end
-    split[2] = tonumber(split[2])
-    if split[2] ~= nil then 
-      self.data:insert(split[1])
-      self.label:insert(split[2])
-    end
+    self.data:insert(split[1])
   end
 
-  print('found ' .. #self.data .. ' items')
+
+  print('found ' .. #self.data .. ' videos')
 end
 
 function dataset:size()
@@ -50,6 +48,7 @@ function dataset:tableToOutput(dataTable, scalarTable, extraTable)
    assert(dataTable[1]:dim() == 3)
    data = torch.Tensor(quantity, 3, self.fineSize, self.fineSize)
    scalarLabels = torch.LongTensor(quantity):fill(-1111)
+   
    for i=1,#dataTable do
       data[i]:copy(dataTable[i])
       scalarLabels[i] = scalarTable[i]
@@ -66,9 +65,12 @@ function dataset:sample(quantity)
    for i=1,quantity do
       local idx = torch.random(1, #self.data)
       local data_path = self.data_root .. '/' .. self.data[idx]
-      local data_label = self.label[idx]
+      local data_label = torch.random(120)
 
       local out = self:trainHook(data_path) 
+      local idx = permutations[data_label]
+      out = out:index(1, idx:long())
+      
       table.insert(dataTable, out)
       table.insert(labelTable, data_label)
       table.insert(extraTable, self.data[idx])
@@ -103,9 +105,40 @@ end
 -- function to load the image, jitter it appropriately (random crops etc.)
 function dataset:trainHook(path)
    collectgarbage()
-   local input = self:loadImage(path)
-   local iW = input:size(3)
-   local iH = input:size(2)
+
+   local oW = self.fineSize
+   local oH = self.fineSize 
+   local h1
+   local w1
+
+   local out = torch.zeros(5, 3, opt.frameSize, oW, oH)
+   local temp = torch.zeros(3, opt.frameSize, oW, oH)
+   local ok,input = pcall(image.load, path, 3, 'float')
+   if not ok then
+      print('warning: failed loading: ' .. path)
+      return out
+   end
+   
+   input = input:reshape(3, 5*opt.loadSize, opt.framSize*opt.loadSize)
+   
+   local count = input:size(2) / opt.loadSize
+   local t1 = 1
+   
+   for j = 1, input:size(3), self.loadSize do
+      count = 1
+      for fr=1,self.frameSize do
+         local off 
+         if fr <= count then 
+            off = (fr+t1-2) * opt.loadSize+1
+         else
+            off = (count+t1-2)*opt.loadSize+1 -- repeat the last frame
+         end
+    
+         local crop = input[{ {}, {off, off+opt.loadSize-1}, {j, j+opt.loadSize-1} }]
+         out[{{count}, {}, fr, {}, {} }]:copy(image.scale(crop, opt.fineSize, opt.fineSize))
+      end
+      count = count + 1
+   end
 
    -- do random crop
    local oW = self.fineSize
@@ -133,29 +166,7 @@ function dataset:trainHook(path)
       out[{ c, {}, {} }]:add(-self.mean[c])
     end
 
-   return out
-end
-
--- reads an image disk
--- if it fails to read the image, it will use a blank image
--- and write to stdout about the failure
--- this means the program will not crash if there is an occassional bad apple
-function dataset:loadImage(path)
-  local ok,input = pcall(image.load, path, 3, 'float') 
-  if not ok then
-     print('warning: failed loading: ' .. path)
-     input = torch.zeros(3, opt.loadSize, opt.loadSize) 
-  else
-    local iW = input:size(3)
-    local iH = input:size(2)
-    if iW < iH then
-        input = image.scale(input, opt.loadSize, opt.loadSize * iH / iW)
-    else
-        input = image.scale(input, opt.loadSize * iW / iH, opt.loadSize) 
-    end
-  end
-
-  return input
+    return out
 end
 
 -- data.lua expects a variable called trainLoader

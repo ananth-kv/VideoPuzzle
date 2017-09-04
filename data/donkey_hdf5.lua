@@ -28,7 +28,7 @@ function dataset:__init(args)
 
 
     self.hdf5_data = hdf5.open(self.labelFile, 'r')
-    self.permutations = torch.load('permutations.dat')
+    self.permutations = torch.load('permutations.t7'):long()
     --fd:close()
 
     -- we are going to read args.data_list
