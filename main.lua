@@ -7,13 +7,13 @@ require 'optim'
 opt = {
     dataset = 'simple',   -- indicates what dataset load to use (in data.lua)
     nThreads = 32,        -- how many threads to pre-fetch data
-    batchSize = 32,      -- self-explanatory
+    batchSize = 16,      -- self-explanatory
     loadSize = 128,       -- when loading images, resize first to this size
     fineSize = 64,       -- crop this size from the loaded image
     frameSize = 16,      -- number of frames per clip
     patchSize = 64,       -- size of each grid (i.e, batch_sizex3x64x64)
-    nClasses = 5,       -- number of category
-    lr = 0.005,           -- learning rate
+    nClasses = 120,       -- number of category
+    lr = 0.01,           -- learning rate
     lr_decay = 10000,     -- how often to decay learning rate (in epoch's)
     beta1 = 0.9,          -- momentum term for adam
     meanIter = 0,         -- how many iterations to retrieve for mean estimation
@@ -25,7 +25,7 @@ opt = {
     randomize = 1,        -- whether to shuffle the data file or not
     cropping = 'random',  -- options for data augmentation
     display_port = 8000,  -- port to push graphs
-    name = 'puzzleVideo',--paths.basename(paths.thisfile()):sub(1,-5), -- the name of the experiment (by default, filename)
+    name = 'exp1',--paths.basename(paths.thisfile()):sub(1,-5), -- the name of the experiment (by default, filename)
     data_root = '',
     data_list = '/nfs_mount/data/ananth/thumos/train.txt',
     mean = {0,0,0},
@@ -151,7 +151,6 @@ local fx = function(x)
     data_im,data_label = data:getBatch()
     data_tm:stop()
 
-    print(#data_im)
     -- ship data to GPU
     input:copy(data_im:squeeze())
     label:copy(data_label)
@@ -164,14 +163,15 @@ local fx = function(x)
 
     local _,preds = output:float():sort(2, true)
 
-    top1 = 0
+    top1 = 0.0
     for i=1, opt.batchSize do
         local rank = torch.eq(preds[i], data_label[i]):nonzero()[1][1]
         if rank == 1 then
             top1 = top1 + 1
         end
     end
-    top1 = top1:div(opt.batchSize)
+
+    top1 = top1/opt.batchSize
     -- return gradients
     return err, gradParameters
 end
@@ -199,7 +199,7 @@ for counter = 1,opt.niter do
     optim.adam(fx, parameters, optimState)
 
     -- logging
-    if false then --counter % 10 == 1 then
+    if counter % 10 == 1 then
         table.insert(history, {counter, err})
         disp.plot(history, {win=1, title=opt.name, labels = {"iteration", "err"}})
     end
